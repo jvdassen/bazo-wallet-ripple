@@ -6,6 +6,11 @@ import Translation from '@/config/Translation';
 
 Vue.use(Vuex);
 
+const RippleAPI = ripple.RippleAPI;
+const api = new RippleAPI({
+  server: 'wss://s.altnet.rippletest.net:51233'
+});
+
 const helpers = {
   findAccountByAddress: (accounts, address) => {
     return accounts.find((candidate) => {
@@ -87,7 +92,7 @@ const store = new Vuex.Store({
       for (var i = 0; i < state.config.accounts.length; i++) {
         let candidate = state.config.accounts[i].balance;
         if (!isNaN(candidate)) {
-          sum += candidate
+          sum += Number(candidate)
         }
       }
       return sum;
@@ -165,7 +170,7 @@ const store = new Vuex.Store({
       );
       // Overwrite the existing completely in order to make sure that the
       // reactivity system works as expected
-      accountToUpdateBalance = {...accountToUpdateBalance, balance: accountData.balance}
+      accountToUpdateBalance.balance = accountData.balance
     },
     updateTimeStamp: function (state) {
       state.config.updatedBalances = new Date();
@@ -180,10 +185,39 @@ const store = new Vuex.Store({
 
 		},
 		updateUserBalance: function (context, options) {
+      api.connect().then(() => {
+        let addressesOnly = context.state.config.accounts.map(account => account.bazoaddress);
+        let accountMutationsFound = false;
+
+        addressesOnly.forEach((addr) => {
+          api.getBalances(addr)
+          .then((balances) => {
+            let accountToUpdateBalance = helpers.findAccountByAddress(
+              context.state.config.accounts, addr
+            );
+            if (accountToUpdateBalance.balance !== balances[0].value) {
+              accountMutationsFound = true;
+            }
+            context.commit('setAccountBalance', {balance: balances[0].value, address: addr})
+            // accountToUpdateBalance.balance = balances[0].value
+          })
+          .catch((err) => {
+            console.log('err:', err);
+          })
+        })
+        if (!options.silent && accountMutationsFound) {
+          Vue.toasted.global.success(Translation.t('userAccounts.alerts.accountMutationDetected'));
+        }
+      })
+      .then(() => {
+      })
+      .catch(console.error);
+
       let addresses = context.state.config.accounts.map(account => account.bazoaddress);
+      let accountMutationsFound = false;
+
       if (addresses.length > 0) {
         HttpService.queryAccountInfo(addresses, options.url, options.silent).then((responses) => {
-          let accountMutationsFound = false;
           responses.forEach((res) => {
             if (res.body.address) {
               let accountToUpdateBalance = helpers.findAccountByAddress(
